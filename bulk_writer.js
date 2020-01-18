@@ -27,7 +27,9 @@ BulkWriter.prototype.start = function start() {
 
 BulkWriter.prototype.stop = function stop() {
   this.running = false;
-  if (!this.timer) { return; }
+  if (!this.timer) {
+    return;
+  }
   clearTimeout(this.timer);
   this.timer = null;
   debug('stopped');
@@ -43,7 +45,9 @@ BulkWriter.prototype.schedule = function schedule() {
 BulkWriter.prototype.tick = function tick() {
   debug('tick');
   const thiz = this;
-  if (!this.running) { return; }
+  if (!this.running) {
+    return;
+  }
   this.flush()
     .then(() => {
       // Emulate finally with last .then()
@@ -64,25 +68,51 @@ BulkWriter.prototype.flush = function flush() {
   const bulk = this.bulk.concat();
   this.bulk = [];
   const body = [];
-  bulk.forEach(({ index, type, doc }) => {
-    body.push({ index: { _index: index, _type: type, pipeline: this.pipeline } }, doc);
+  bulk.forEach(({
+    index,
+    type,
+    doc
+  }) => {
+    body.push({
+      index: {
+        _index: index,
+        _type: type,
+        pipeline: this.pipeline
+      }
+    }, doc);
   });
   debug('bulk writer is going to write', body);
   return this.write(body);
 };
 
 BulkWriter.prototype.append = function append(index, type, doc) {
+  debug('starting append function');
   if (this.options.buffering === true) {
     if (typeof this.options.bufferLimit === 'number' && this.bulk.length >= this.options.bufferLimit) {
-      debug('message discarded because buffer limit exceeded');
-      // @todo: i guess we can use callback to notify caller
-      return;
+      debug('buffer limit exceeded - flushing');
+      const thiz = this;
+      this.flush()
+        .then(() => {
+          // Emulate finally with last .then()
+        })
+        .then(() => { // finally()
+          thiz.schedule();
+        });
     }
+    debug('do the bulk push');
     this.bulk.push({
-      index, type, doc
+      index,
+      type,
+      doc
     });
   } else {
-    this.write([{ index: { _index: index, _type: type, pipeline: this.pipeline } }, doc]);
+    this.write([{
+      index: {
+        _index: index,
+        _type: type,
+        pipeline: this.pipeline
+      }
+    }, doc]);
   }
 };
 
@@ -107,7 +137,11 @@ BulkWriter.prototype.write = function write(body) {
     // rollback this.bulk array
     const newBody = [];
     for (let i = 0; i < body.length; i += 2) {
-      newBody.push({ index: body[i].index._index, type: body[i].index._type, doc: body[i + 1] });
+      newBody.push({
+        index: body[i].index._index,
+        type: body[i].index._type,
+        doc: body[i + 1]
+      });
     }
     const lenSum = thiz.bulk.length + newBody.length;
     if (thiz.options.bufferLimit && (lenSum >= thiz.options.bufferLimit)) {
