@@ -1,3 +1,4 @@
+'use strict';
 /* eslint no-underscore-dangle: ["error", { "allow": ["_index", "_type"] }] */
 
 const fs = require('fs');
@@ -46,6 +47,7 @@ BulkWriter.prototype.tick = function tick() {
   debug('tick');
   const thiz = this;
   if (!this.running) {
+    debug('not running');
     return;
   }
   this.flush()
@@ -135,12 +137,17 @@ BulkWriter.prototype.write = function write(body) {
     }
   }).catch((e) => { // prevent [DEP0018] DeprecationWarning
     // rollback this.bulk array
+    debug('catch e -- no longer rolling back, instead log the error')
     const newBody = [];
     for (let i = 0; i < body.length; i += 2) {
       newBody.push({
         index: body[i].index._index,
         type: body[i].index._type,
-        doc: body[i + 1]
+        doc: {
+          "@timestamp": Date.now(),
+          "message": e.toString(),
+          "orig_body": body[i + 1]
+        },
       });
     }
     const lenSum = thiz.bulk.length + newBody.length;
@@ -149,7 +156,14 @@ BulkWriter.prototype.write = function write(body) {
     } else {
       thiz.bulk = newBody.concat(thiz.bulk);
     }
-    thiz.transport.emit('error', e);
+
+    try {
+      thiz.transport.emit('error', e);
+    } catch (error) {
+      debug('trycatch error:');
+      debug(error);
+    }
+
     // eslint-disable-next-line no-console
     console.error(e);
 
