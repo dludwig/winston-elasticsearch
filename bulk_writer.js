@@ -146,7 +146,9 @@ BulkWriter.prototype.write = function write(body) {
         doc: {
           "@timestamp": Date.now(),
           "message": e.toString(),
-          "orig_body": body[i + 1]
+          "original": {
+            "message": JSON.stringify(body[i + 1]),
+          },
         },
       });
     }
