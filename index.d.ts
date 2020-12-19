@@ -1,43 +1,49 @@
-declare module 'winston-elasticsearch' {
-  import { Client, ClientOptions, ApiResponse } from '@elastic/elasticsearch';
-  import TransportStream from 'winston-transport';
+import * as Agent from 'elastic-apm-node';
+import { Client, ClientOptions, ApiResponse } from '@elastic/elasticsearch';
+import TransportStream = require('winston-transport');
 
-  export interface LogData {
-    message: any;
-    level: string;
-    meta: { [key: string]: any };
-    timestamp?: string;
-  }
+export interface LogData {
+  message: any;
+  level: string;
+  meta: { [key: string]: any };
+  timestamp?: string;
+}
 
-  export interface Transformer {
-    (logData: LogData): any;
-  }
+export interface Transformer {
+  (logData: LogData): any;
+}
 
-  export interface ElasticsearchTransportOptions extends TransportStream.TransportStreamOptions {
-    timestamp?: () => string;
-    level?: string;
-    index?: string;
-    indexPrefix?: string;
-    indexSuffixPattern?: string;
-    messageType?: string;
-    transformer?: Transformer;
-    mappingTemplate?: { [key: string]: any };
-    ensureMappingTemplate?: boolean;
-    flushInterval?: number;
-    waitForActiveShards?: number | 'all';
-    handleExceptions?: boolean;
-    pipeline?: string;
-    client?: Client;
-    clientOpts?: ClientOptions;
-    buffering?: boolean;
-    bufferLimit?: number;
-  }
+export interface ElasticsearchTransportOptions extends TransportStream.TransportStreamOptions {
+  dataStream?: boolean;
+  apm?: typeof Agent;
+  timestamp?: () => string;
+  level?: string;
+  index?: string;
+  indexPrefix?: string;
+  indexSuffixPattern?: string;
+  messageType?: string;
+  transformer?: Transformer;
+  mappingTemplate?: { [key: string]: any };
+  ensureMappingTemplate?: boolean;
+  elasticsearchVersion?: number;
+  flushInterval?: number;
+  waitForActiveShards?: number | 'all';
+  handleExceptions?: boolean;
+  pipeline?: string;
+  client?: Client;
+  clientOpts?: ClientOptions;
+  buffering?: boolean;
+  bufferLimit?: number;
+  healthCheckTimeout?: string;
+  healthCheckWaitForStatus?: string;
+  healthCheckWaitForNodes?: string;
+}
 
-  export default class ElasticsearchTransport extends TransportStream {
-    constructor(opts?: ElasticsearchTransportOptions);
+export class ElasticsearchTransport extends TransportStream {
+  constructor(opts?: ElasticsearchTransportOptions);
+  flush(): Promise<any>;
 
-    query<T>(options: any, callback?: () => void): Promise<ApiResponse<T>>;
-    query<T>(q: string): Promise<ApiResponse<T>>;
-    getIndexName(opts: ElasticsearchTransportOptions): string;
-  }
+  query<T>(options: any, callback?: () => void): Promise<ApiResponse<T>>;
+  query<T>(q: string): Promise<ApiResponse<T>>;
+  getIndexName(opts: ElasticsearchTransportOptions): string;
 }

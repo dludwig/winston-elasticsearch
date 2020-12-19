@@ -9,31 +9,46 @@ const { Client } = require('@elastic/elasticsearch');
 const defaultTransformer = require('./transformer');
 const BulkWriter = require('./bulk_writer');
 
-module.exports = class Elasticsearch extends Transport {
+class ElasticsearchTransport extends Transport {
   constructor(opts) {
     super(opts);
     this.name = 'elasticsearch';
+    this.handleExceptions = opts.handleExceptions || false;
+    this.handleRejections = opts.handleRejections || false;
+    this.exitOnError = false;
+    this.source = null;
 
-    this.on('finish', (info) => {
-      this.bulkWriter.schedule = () => { };
+    this.on('pipe', (source) => {
+      this.source = source;
     });
+
+    this.on('error', (err) => {
+      this.source.pipe(this); // re-pipes readable
+    });
+
     this.opts = opts || {};
 
     // Set defaults
     defaults(opts, {
       level: 'info',
       index: null,
-      indexPrefix: 'logs',
+      indexPrefix: opts.dataStream ? 'app' : 'logs',
       indexSuffixPattern: 'YYYY.MM.DD',
       messageType: '_doc',
       transformer: defaultTransformer,
       ensureMappingTemplate: true,
+      elasticsearchVersion: 7,
       flushInterval: 2000,
       waitForActiveShards: 1,
       handleExceptions: false,
+      exitOnError: false,
       pipeline: null,
       bufferLimit: null,
-      buffering: true
+      buffering: true,
+      healthCheckTimeout: '30s',
+      healthCheckWaitForStatus: 'yellow',
+      healthCheckWaitForNodes: '>=1',
+      dataStream: false,
     });
 
     // Use given client or create one
@@ -57,7 +72,7 @@ module.exports = class Elasticsearch extends Transport {
       this.client = new Client(copts);
     }
 
-    const bulkWriteropts = {
+    const bulkWriterOpts = {
       interval: opts.flushInterval,
       waitForActiveShards: opts.waitForActiveShards,
       pipeline: opts.pipeline,
@@ -66,14 +81,29 @@ module.exports = class Elasticsearch extends Transport {
       indexPrefix: opts.indexPrefix,
       buffering: opts.buffering,
       bufferLimit: opts.buffering ? opts.bufferLimit : 0,
+      elasticsearchVersion: opts.elasticsearchVersion,
+      healthCheckTimeout: opts.healthCheckTimeout,
+      healthCheckWaitForStatus: opts.healthCheckWaitForStatus,
+      healthCheckWaitForNodes: opts.healthCheckWaitForNodes,
+      dataStream: opts.dataStream
     };
 
-    this.bulkWriter = new BulkWriter(
-      this,
-      this.client,
-      bulkWriteropts
-    );
+    this.bulkWriter = new BulkWriter(this, this.client, bulkWriterOpts);
     this.bulkWriter.start();
+  }
+
+  async flush() {
+    await this.bulkWriter.flush();
+  }
+
+  // end() will be called from here: https://github.com/winstonjs/winston/blob/master/lib/winston/logger.js#L328
+  end(chunk, encoding, callback) {
+    this.bulkWriter.schedule = () => { };
+    this.bulkWriter.flush().then(() => {
+      setImmediate(() => {
+        super.end(chunk, encoding, callback); // this emits finish event from stream
+      });
+    });
   }
 
   log(info, callback) {
@@ -91,18 +121,46 @@ module.exports = class Elasticsearch extends Transport {
     };
 
     const entry = this.opts.transformer(logData);
-    let index = this.getIndexName(this.opts);
+
+    let index = this.opts.dataStream 
+      ? this.getDataStreamName(this.opts) 
+      : this.getIndexName(this.opts);
+
     if (entry.indexInterfix !== undefined) {
-      index = this.getIndexName(this.opts, entry.indexInterfix);
+      index = this.opts.dataStream 
+        ? this.getDataStreamName(this.opts, entry.indexInterfix)
+        : this.getIndexName(this.opts, entry.indexInterfix)
       delete entry.indexInterfix;
     }
-    this.bulkWriter.append(
-      index,
-      this.opts.messageType,
-      entry
-    );
+
+    if (this.opts.apm) {
+      const apm = this.opts.apm.currentTraceIds;
+      if (apm['transaction.id']) entry.transaction = { id: apm['transaction.id'], ...entry.transaction };
+      if (apm['trace.id']) entry.trace = { id: apm['trace.id'], ...entry.trace };
+      if (apm['span.id']) entry.span = { id: apm['span.id'], ...entry.span };
+    }
+
+    this.bulkWriter.append(index, this.opts.messageType, entry);
 
     callback();
+  }
+
+  getDataStreamName(opts, indexInterfix) {
+    let indexName = opts.index;
+    if (indexName === null) {
+
+      let indexPrefix = opts.indexPrefix;
+      if (typeof indexPrefix === 'function') {
+        // eslint-disable-next-line prefer-destructuring
+        indexPrefix = opts.indexPrefix();
+      }
+      
+      indexName = 'logs-' 
+        + opts.indexPrefix
+        + '-'
+        + (indexInterfix !== undefined ? indexInterfix : 'default') 
+    }
+    return indexName;
   }
 
   getIndexName(opts, indexInterfix) {
@@ -117,10 +175,17 @@ module.exports = class Elasticsearch extends Transport {
       }
       const now = dayjs();
       const dateString = now.format(opts.indexSuffixPattern);
-      indexName = indexPrefix + (indexInterfix !== undefined ? '-' + indexInterfix : '') + '-' + dateString;
+      indexName = indexPrefix
+        + (indexInterfix !== undefined ? '-' + indexInterfix : '')
+        + '-'
+        + dateString;
     }
     return indexName;
   }
-};
+}
 
-winston.transports.Elasticsearch = module.exports;
+winston.transports.Elasticsearch = ElasticsearchTransport;
+
+module.exports = {
+  ElasticsearchTransport
+};

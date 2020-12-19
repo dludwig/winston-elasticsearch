@@ -20,7 +20,7 @@ transport for the [winston](https://github.com/winstonjs/winston) logging toolki
 
 ### Compatibility
 
-For  **Winston 3.x**, **Elasticsearch 6.0** and later, use the `0.7.0`.
+For **Winston 3.x**, **Elasticsearch 7.0** and later, use the >= `0.7.0`.
 For **Elasticsearch 6.0** and later, use the `0.6.0`.
 For **Elasticsearch 5.0** and later, use the `0.5.9`.
 For earlier versions, use the `0.4.x` series.
@@ -38,16 +38,24 @@ npm install --save winston winston-elasticsearch
 ## Usage
 
 ```js
-var winston = require('winston');
-var Elasticsearch = require('winston-elasticsearch');
+const winston = require('winston');
+const { ElasticsearchTransport } = require('winston-elasticsearch');
 
-var esTransportOpts = {
+const esTransportOpts = {
   level: 'info'
 };
-var logger = winston.createLogger({
+const esTransport = new ElasticsearchTransport(esTransportOpts);
+const logger = winston.createLogger({
   transports: [
-    new Elasticsearch(esTransportOpts)
+    esTransport
   ]
+});
+// Compulsory error handling
+logger.on('error', (error) => {
+  console.error('Error caught', error);
+});
+esTransport.on('warning', (error) => {
+  console.error('Error caught', error);
 });
 ```
 
@@ -58,20 +66,27 @@ If multiple objects are provided as arguments, the contents are stringified.
 ## Options
 
 - `level` [`info`] Messages logged with a severity greater or equal to the given one are logged to ES; others are discarded.
-- `index` [none] the index to be used. This option is mutually exclusive with `indexPrefix`.
-- `indexPrefix` [`logs`] the prefix to use to generate the index name according to the pattern `<indexPrefix>-<indexInterfix>-<indexSuffixPattern>`. Can be string or function, returning the string to use.
+- `index` [none] The index to be used. This option is mutually exclusive with `indexPrefix`.
+- `indexPrefix` [`logs` | when dataStream:true, `app`] The prefix to use to generate the index name according to the pattern `<indexPrefix>-<indexInterfix>-<indexSuffixPattern>`. Can be string or function, returning the string to use.
 - `indexSuffixPattern` [`YYYY.MM.DD`] a [Moment.js](http://momentjs.com/) compatible date/ time pattern.
-- `messageType` [`_doc`] the type (path segment after the index path) under which the messages are stored under the index.
-- `transformer` [see below] a transformer function to transform logged data into a different message structure.
+- `messageType` [`_doc`] The type (path segment after the index path) under which the messages are stored under the index.
+- `transformer` [see below] A transformer function to transform logged data into a different message structure.
 - `ensureMappingTemplate` [`true`] If set to `true`, the given `mappingTemplate` is checked/ uploaded to ES when the module is sending the fist log message to make sure the log messages are mapped in a sensible manner.
-- `mappingTemplate` [see file `index-template-mapping.json` file] the mapping template to be ensured as parsed JSON.
-- `flushInterval` [`2000`] distance between bulk writes in ms.
+- `mappingTemplate` [see file `index-template-mapping-es-gte-7.json` or `index-template-mapping-es-lte-6.json`] the mapping template to be ensured as parsed JSON.
+- `elasticsearchVersion` [`7`] Elasticsearch version you are using. This helps decide the default mapping template that will be used when `ensureMappingTemplate` is `true` and `mappingTemplate` is `undefined`
+- `flushInterval` [`2000`] Time span between bulk writes in ms.
+- `retryLimit` [`400`] Number of retries to connect to ES before giving up.
+- `healthCheckTimeout` [`30s`] Timeout for one health check (health checks will be retried forever).
+- `healthCheckWaitForStatus` [`yellow`] Status to wait for when check upon health. See [its API docs](https://www.elastic.co/guide/en/elasticsearch/reference/current/cluster-health.html) for supported options.
+- `healthCheckWaitForNodes` [`>=1`] Nodes to wait for when check upon health. See [its API docs](https://www.elastic.co/guide/en/elasticsearch/reference/current/cluster-health.html) for supported options.
 - `client` An [elasticsearch client](https://www.npmjs.com/package/@elastic/elasticsearch) instance. If given, all following options are ignored.
 - `clientOpts` An object hash passed to the ES client. See [its docs](https://www.elastic.co/guide/en/elasticsearch/client/javascript-api/current/client-configuration.html) for supported options.
 - `waitForActiveShards` [`1`] Sets the number of shard copies that must be active before proceeding with the bulk operation.
 - `pipeline` [none] Sets the pipeline id to pre-process incoming documents with. See [the bulk API docs](https://www.elastic.co/guide/en/elasticsearch/client/javascript-api/current/api-reference.html#api-bulk).
 - `buffering` [true] Boolean flag to enable or disable messages buffering. The `bufferLimit` option is ignored if set to `false`.
 - `bufferLimit` [null] Limit for the number of log messages in the buffer.
+- `apm` [null] Inject [apm client](https://www.npmjs.com/package/elastic-apm-node) to link elastic logs with elastic apm traces.
+- `dataStream` [false] Use Elasticsearch [datastreams](https://www.elastic.co/guide/en/elasticsearch/reference/master/data-streams.html).
 
 ### Logging of ES Client
 
@@ -138,7 +153,7 @@ Output A:
 ```
 
 Note that in current logstash versions, the only "standard fields" are
-`@timestamp` and `@version`, anything else ist just free.
+`@timestamp` and `@version`, anything else is just free.
 
 A custom transformer function can be provided in the options hash.
 
@@ -190,3 +205,121 @@ This message would be POSTed to the following endpoint:
     http://localhost:9200/logs-2019.09.30/log/
 
 So the default mapping uses an index pattern `logs-*`.
+
+## Logs correlation with Elastic APM
+
+### Instrument your code
+
+- Install the official nodejs client for [elastic-apm](https://www.npmjs.com/package/elastic-apm-node)
+
+```sh
+yarn add elastic-apm-node
+- or -
+npm install elastic-apm-node
+```
+
+Then, before any other require in your code, do:
+
+```js
+const apm = require("elastic-apm-node").start({
+  serverUrl: "<apm server http url>"
+})
+
+// Set up the logger
+var winston = require('winston');
+var Elasticsearch = require('winston-elasticsearch');
+
+var esTransportOpts = {
+  apm,
+  level: 'info',
+  clientOpts: { node: "<elastic server>" }
+};
+var logger = winston.createLogger({
+  transports: [
+    new Elasticsearch(esTransportOpts)
+  ]
+});
+```
+
+### Inject apm traces into logs
+
+```js
+logger.info('Some log message');
+```
+
+Will produce:
+
+```js
+{
+  "@timestamp": "2020-03-13T20:35:28.129Z",
+  "message": "Some log message",
+  "severity": "info",
+  "fields": {},
+  "transaction": {
+    "id": "1f6c801ffc3ae6c6"
+  },
+  "trace": {
+    "id": "1f6c801ffc3ae6c6"
+  }
+}
+```
+
+### Notice
+
+Some "custom" logs may not have the apm trace.
+
+If that is the case, you can retrieve traces using `apm.currentTraceIds` like so:
+
+```js
+logger.info("Some log message", { ...apm.currentTracesIds })
+```
+
+The transformer function (see above) will place the apm trace in the root object
+so that kibana can link Logs to APMs.
+
+**Custom traces WILL TAKE PRECEDENCE**
+
+If you are using a custom transformer, you should add the following code into it:
+
+```js
+  if (logData.meta['transaction.id']) transformed.transaction = { id: logData.meta['transaction.id'] };
+  if (logData.meta['trace.id']) transformed.trace = { id: logData.meta['trace.id'] };
+  if (logData.meta['span.id']) transformed.span = { id: logData.meta['span.id'] };
+```
+
+This scenario may happen on a server (e.g. restify) where you want to log the query
+after it was sent to the client (e.g. using `server.on('after', (req, res, route, error) => log.debug("after", { route, error }))`).
+In that case you will not get the traces into the response because traces would
+have stopped (as the server sent the response to the client).
+
+In that scenario, you could do something like so:
+
+```js
+server.use((req, res, next) => {
+  req.apm = apm.currentTracesIds
+  next()
+})
+server.on("after", (req, res, route, error) => log.debug("after", { route, error, ...req.apm }))
+```
+
+## Manual Flushing
+
+Flushing can be manually triggered like this:
+
+```js
+const esTransport = new ElasticsearchTransport(esTransportOpts);
+esTransport.flush();
+```
+
+## Datastreams
+
+Elasticsearch 7.9 and higher supports [Datstreams](https://www.elastic.co/guide/en/elasticsearch/reference/master/data-streams.html).
+
+When `dataStream: true` is set, bulk indexing happens with `create` instead of `index`, and also the default naming convention is `logs-*-*`, which will match the built-in [Index template](https://www.elastic.co/guide/en/elasticsearch/reference/master/index-templates.html) and [ILM](https://www.elastic.co/guide/en/elasticsearch/reference/master/index-lifecycle-management.html) policy,
+automatically creating a datastream.
+
+By default, the datastream will be named `logs-app-default`, but you can modify that by setting `indexPrefix` in options, and `indexInterfix` in a transformer, resulting in `logs-<indexPrefix>-<indexInterfix>`.
+
+Alternatively, you can simply set the `index` option to anything that matches `logs-*-*` to make use of the built-in template and ILM policy.
+
+If `dataStream: true` is enabled, AND ( you are using Elasticsearch < 7.9 OR (you have set a custom `index` that does not match `logs-*-*`  AND you have not created a custom matching template in Elasticsearch)), a normal index will be created.

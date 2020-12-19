@@ -1,4 +1,76 @@
-0.8.3 / 2019-12-20
+0.12.3 / 2020-12-04
+===================
+
+- Increase retries from 5 to 400 (almost 7 minutes) as some massive uServices systems take a while until they spun up
+
+0.12.2 / 2020-11-26
+===================
+
+- Inject indexing error in case writing to ES fails
+
+0.12.1 / 2020-11-13
+===================
+
+- Use latest ES client
+- Docs fixes
+
+0.12.0 / 2020-11-02
+===================
+
+- Make retry mechanism give up after 5 retries
+- Make emit a warning only when the max retry has been reached
+- Make APM param optional
+- Move APM dependency into normal dependencies
+
+0.11.0 / 2020-10-22
+===================
+
+- Improve typings
+- Added flush() method to ES transport
+
+0.10.0 / 2020-08-18
+===================
+
+- Emit transport internal errors no longer as `error` but as `warning` because even when listened to with `.on('error', ...)` it lead to an `UnhandledPromiseRejectionWarning`.
+
+0.9.0 / 2020-05-16
+==================
+
+- Upgrade ES Client
+- New approach to error handling where, in case of an emitted error the source stream is automatically re-attached to the transport stream
+- This commit adds a retry counter - after the number of retries has been exceeded then the document is discarded.
+- Exposes healthcheck options
+- ES version specific mapping templates
+
+0.8.8 / 2020-04-07
+==================
+
+- Fix typings
+
+0.8.7 / 2020-04-02
+==================
+
+- Fix typings
+
+0.8.6 / 2020-04-01
+==================
+
+- Remove default export from typings
+
+0.8.5 / 2020-03-09
+==================
+
+- Upgrade dependencies
+- Correct order for entries with same timestamp
+- Fix edge case with `this.client.bulk`
+
+0.8.4 / 2020-01-20
+==================
+
+- Upgrade typings
+- Make compatible with ES client 7.6
+
+0.8.3 / 2019-01-20
 ==================
 
 - Upgrade deps
